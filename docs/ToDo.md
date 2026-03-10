@@ -1,0 +1,2 @@
+- Add CORS
+- ADD CSRF

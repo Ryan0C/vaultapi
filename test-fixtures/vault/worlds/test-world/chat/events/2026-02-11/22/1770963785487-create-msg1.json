@@ -1,0 +1,8 @@
+{
+  "op": "create",
+  "ts": 1770963785487,
+  "id": "msg1",
+  "message": {
+    "content": "Hello world"
+  }
+}

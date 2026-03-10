@@ -1,0 +1,182 @@
+// @ts-nocheck
+// src/routes/packs.ts
+import { Router } from "express";
+import type { CreateAppDeps } from "../app.js";
+import { makeRequireWorldMember } from "../middleware/authz.js";
+
+type ItemsPacksStore = {
+  listPackIds(worldId: string): Promise<string[]>;
+  getPackMeta(worldId: string, packId: string): Promise<any | null>;
+  readLatestPackIndex(worldId: string, packId: string): Promise<any | null>;
+  searchPackEntries(args: {
+    worldId: string;
+    packId: string;
+    q?: string;
+    limit?: number;
+    type?: string;
+    level?: number;
+    cls?: string;
+    subclass?: string;
+  }): Promise<any[]>;
+};
+
+function firstQueryValue(v: unknown): string {
+  if (Array.isArray(v)) return String(v[0] ?? "");
+  return String(v ?? "");
+}
+
+function optionalString(v: unknown): string | undefined {
+  const s = firstQueryValue(v).trim();
+  return s ? s : undefined;
+}
+
+function optionalNumber(v: unknown): number | undefined {
+  const raw = firstQueryValue(v).trim();
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+export function makePacksRouter(deps: CreateAppDeps) {
+  const router = Router();
+  const { authStore } = deps;
+  const { itemsPacksStore } = deps;
+
+  const requireWorldMember = makeRequireWorldMember(authStore);
+
+  /**
+   * GET /worlds/:worldId/packs
+   */
+  router.get("/:worldId/packs", requireWorldMember, async (req, res, next) => {
+    try {
+      const { worldId } = req.params;
+
+      deps.logger.info("packs.list", { worldId });
+
+      const packIds = await itemsPacksStore.listPackIds(worldId);
+      const metas = await Promise.all(
+        packIds.map((id) => itemsPacksStore.getPackMeta(worldId, id))
+      );
+
+      const packs = metas
+        .filter(Boolean)
+        .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id)));
+
+      // Safe for authenticated endpoints: keep cache private to the user agent.
+      res.setHeader("Cache-Control", "private, max-age=30, stale-while-revalidate=30");
+
+      return res.json({
+        ok: true,
+        worldId,
+        count: packs.length,
+        packs,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /worlds/:worldId/packs/:packId/index
+   */
+  router.get("/:worldId/packs/:packId/index", requireWorldMember, async (req, res, next) => {
+    try {
+      const { worldId, packId } = req.params;
+      const idx = await itemsPacksStore.readLatestPackIndex(worldId, packId);
+
+      if (!idx) {
+        return res.status(404).json({ ok: false, error: "Pack index not found" });
+      }
+
+      res.setHeader("Cache-Control", "private, max-age=30, stale-while-revalidate=30");
+
+      return res.json({ ok: true, worldId, packId, index: idx });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /worlds/:worldId/packs/:packId/search?q=...&limit=...&type=...&level=...&cls=...&subclass=...
+   */
+  router.get("/:worldId/packs/:packId/search", requireWorldMember, async (req, res, next) => {
+    try {
+      const { worldId, packId } = req.params;
+
+        const q = String((req.query as any)?.q ?? "");
+        const limit = Number((req.query as any)?.limit ?? 50);
+
+        const cls = String((req.query as any)?.cls ?? "").trim() || undefined;
+        const subclass = String((req.query as any)?.subclass ?? "").trim() || undefined;
+        const school = String((req.query as any)?.school ?? "").trim() || undefined;
+        const type = String((req.query as any)?.type ?? "").trim() || undefined;
+
+        const levelRaw = (req.query as any)?.level;
+        const level =
+        levelRaw == null || levelRaw === ""
+            ? undefined
+            : Number(levelRaw);
+
+        const concentrationRaw = String((req.query as any)?.concentration ?? "").trim();
+        const concentration =
+        concentrationRaw === "true" ? true :
+        concentrationRaw === "false" ? false :
+        undefined;
+
+        const ritualRaw = String((req.query as any)?.ritual ?? "").trim();
+        const ritual =
+        ritualRaw === "true" ? true :
+        ritualRaw === "false" ? false :
+        undefined;
+
+        const hasAnyCriteria =
+        !!q.trim() ||
+        !!cls ||
+        !!subclass ||
+        !!school ||
+        !!type ||
+        level != null ||
+        concentration != null ||
+        ritual != null;
+
+        if (!hasAnyCriteria) {
+        return res.status(400).json({ ok: false, error: "Provide q or at least one filter" });
+        }
+
+        const hits = await itemsPacksStore.searchPackEntries({
+        worldId,
+        packId,
+        q,
+        limit,
+        cls,
+        subclass,
+        school,
+        type,
+        level,
+        concentration,
+        ritual,
+        });
+
+      res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+
+      return res.json({
+        ok: true,
+        worldId,
+        packId,
+        q: q ?? "",
+        filters: {
+          type: type ?? null,
+          level: level ?? null,
+          cls: cls ?? null,
+          subclass: subclass ?? null,
+        },
+        count: hits.length,
+        hits,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  return router;
+}

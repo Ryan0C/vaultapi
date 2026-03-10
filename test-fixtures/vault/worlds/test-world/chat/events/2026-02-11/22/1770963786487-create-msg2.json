@@ -1,0 +1,8 @@
+{
+  "op": "create",
+  "ts": 1770963786487,
+  "id": "msg2",
+  "message": {
+    "content": "Second message"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "worldId": "test-world",
+  "count": 2,
+  "actors": [
+    {
+      "id": "actorA",
+      "name": "Sir Testalot",
+      "type": "character"
+    },
+    {
+      "id": "actorB",
+      "name": "Goblin Tester",
+      "type": "npc"
+    }
+  ],
+  "generatedAt": "2026-02-13T06:23:05.486Z"
+}
