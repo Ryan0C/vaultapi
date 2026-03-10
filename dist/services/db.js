@@ -700,5 +700,6 @@ CREATE INDEX IF NOT EXISTS idx_vendor_tx_vendor ON vendor_transactions(vendor_id
     ensureColumn("vendors", "greetings", `ALTER TABLE vendors ADD COLUMN greetings TEXT NOT NULL DEFAULT '[]';`);
     // vendor npc name (added 2026-03)
     ensureColumn("vendors", "npc_name", `ALTER TABLE vendors ADD COLUMN npc_name TEXT;`);
+    ensureColumn("invites", "display_name", `ALTER TABLE invites ADD COLUMN display_name TEXT;`);
 }
 //# sourceMappingURL=db.js.map
