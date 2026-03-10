@@ -47,6 +47,7 @@ export function migrate() {
 CREATE TABLE IF NOT EXISTS vault_users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
+  display_name TEXT,
   email TEXT UNIQUE,
   password_hash TEXT,
   must_reset_password INTEGER NOT NULL DEFAULT 0,
@@ -701,5 +702,8 @@ CREATE INDEX IF NOT EXISTS idx_vendor_tx_vendor ON vendor_transactions(vendor_id
     // vendor npc name (added 2026-03)
     ensureColumn("vendors", "npc_name", `ALTER TABLE vendors ADD COLUMN npc_name TEXT;`);
     ensureColumn("invites", "display_name", `ALTER TABLE invites ADD COLUMN display_name TEXT;`);
+    ensureColumn("vault_users", "username", `ALTER TABLE vault_users ADD COLUMN username TEXT;`);
+    ensureColumn("vault_users", "display_name", `ALTER TABLE vault_users ADD COLUMN display_name TEXT;`);
+    
 }
 //# sourceMappingURL=db.js.map
