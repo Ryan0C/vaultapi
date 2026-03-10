@@ -1,5 +1,5 @@
 // stores/vaultSyncStore.ts
-import { RootStore } from "./rootStore";
+import { RootStore } from "./rootStore.js";
 export function safeId(id) {
     return String(id ?? "unknown").replace(/[^a-zA-Z0-9_-]/g, "");
 }

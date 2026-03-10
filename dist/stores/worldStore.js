@@ -1,6 +1,6 @@
 // @ts-nocheck
 // stores/worldStore.ts
-import { RootStore } from "./rootStore";
+import { RootStore } from "./rootStore.js";
 export class WorldStore extends RootStore {
     /* -------------------------------------------- */
     /* Core layout helpers                          */

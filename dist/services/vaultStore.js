@@ -1,8 +1,8 @@
 // @ts-nocheck
 import path from "node:path";
 import fs from "node:fs/promises";
-import { config } from "../config";
-import { createLogger } from "./logger";
+import { config } from "../config.js";
+import { createLogger } from "./logger.js";
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 export function safeId(id) {
     // Must match vault-sync safeId() exactly (filenames must line up)

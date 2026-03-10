@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { makeRequireWorldMember } from "../middleware/authz.js";
-import { makeRequireDocPickerAccess } from "../middleware/docPolicy"; // your new middleware
+import { makeRequireDocPickerAccess } from "../middleware/docPolicy.js"; // your new middleware
 import { forbidden, unauthorized } from "../utils/errors.js";
 const INDEX_CACHE = new Map();
 const INDEX_CACHE_MS = 30_000; // 30s is plenty, vaultsync updates are frequent

@@ -1,6 +1,6 @@
 // src/services/vaultRoot.ts
 import path from "path";
-import { config } from "../config";
+import { config } from "../config.js";
 /**
  * Return an absolute filesystem path pointing at the Foundry UserData root
  * (or whichever directory contains `vault/`).

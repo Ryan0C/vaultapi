@@ -1,7 +1,7 @@
 // stores/actorsStore.ts
 import path from "node:path";
 import fs from "node:fs/promises";
-import { createLogger } from "../services/logger";
+import { createLogger } from "../services/logger.js";
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 export class ActorsStore {
     dataRoot;

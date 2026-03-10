@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { CreateAppDeps } from "../app.js";
 import { makeRequireWorldMember } from "../middleware/authz.js";
-import { makeRequireDocPickerAccess } from "../middleware/docPolicy"; // your new middleware
+import { makeRequireDocPickerAccess } from "../middleware/docPolicy.js"; // your new middleware
 import { forbidden, unauthorized } from "../utils/errors.js";
 
 type CachedIndex = { ts: number; entries: any[] };

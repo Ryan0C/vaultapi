@@ -1,5 +1,5 @@
 // stores/vaultSyncStore.ts
-import { RootStore } from "./rootStore";
+import { RootStore } from "./rootStore.js";
 
 export type WorldId = string;
 
