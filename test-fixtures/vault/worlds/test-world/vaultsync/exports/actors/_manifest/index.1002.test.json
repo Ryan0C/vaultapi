@@ -1,0 +1,28 @@
+{
+  "worldId": "test-world",
+  "generatedAt": "2026-03-11T00:00:02.000Z",
+  "actors": {
+    "actorA": {
+      "id": "actorA",
+      "key": "actorA",
+      "uuid": "Actor.actorA",
+      "externalId": "vh:Actor:actorA",
+      "name": "Sir Testalot",
+      "type": "character",
+      "latestFile": "worlds/test-world/vaultsync/exports/actors/actor.actorA.1000.test.json",
+      "updatedAt": "2026-03-11T00:00:00.000Z",
+      "exportedAt": "2026-03-11T00:00:00.000Z"
+    },
+    "actorB": {
+      "id": "actorB",
+      "key": "actorB",
+      "uuid": "Actor.actorB",
+      "externalId": "vh:Actor:actorB",
+      "name": "Goblin Tester",
+      "type": "npc",
+      "latestFile": "worlds/test-world/vaultsync/exports/actors/actor.actorB.1001.test.json",
+      "updatedAt": "2026-03-11T00:00:01.000Z",
+      "exportedAt": "2026-03-11T00:00:01.000Z"
+    }
+  }
+}

@@ -3,12 +3,16 @@
 import request from "supertest";
 import { describe, it, expect, beforeAll } from "vitest";
 import path from "node:path";
+import fs from "node:fs/promises";
 import session from "express-session";
 
 import { createApp } from "../app.js";
 import { VaultStore } from "../services/vaultStore.js";
 import { migrate } from "../services/db.js";
 import { authStore } from "../services/authStore.js";
+import { WorldStore } from "../stores/worldStore.js";
+import { ActorsStore } from "../stores/actorsStore.js";
+import { ImportsStore } from "../stores/importStore.js";
 import bcrypt from "bcryptjs";
 import { v4 as uuid } from "uuid";
 import { db } from "../services/db.js";
@@ -22,6 +26,7 @@ type Logger = {
 // Simple noop logger for tests
 const logger: Logger = {
   info: () => {},
+  debug: () => {},
   warn: () => {},
   error: () => {}
 };
@@ -54,6 +59,82 @@ function createVaultUserInDb(args: { username: string; password: string }) {
   return { id };
 }
 
+async function createAndLoginUser(app: ReturnType<typeof createApp>, suffix: string) {
+  const username = `perm_${suffix}_${uuid().slice(0, 6)}`;
+  const password = "Test_password_123";
+  const user = createVaultUserInDb({ username, password });
+  const userAgent = request.agent(app);
+  const loginRes = await userAgent.post("/auth/login").send({
+    username,
+    password
+  });
+
+  expect(loginRes.status).toBe(200);
+  expect(loginRes.body.ok).toBe(true);
+
+  return { userId: user.id, username, password, agent: userAgent };
+}
+
+async function ensureActorsExportFixtures() {
+  const worldId = "test-world";
+  const exportDir = path.join(fixtureRoot, "worlds", worldId, "vaultsync", "exports", "actors");
+  const manifestDir = path.join(exportDir, "_manifest");
+  await fs.mkdir(manifestDir, { recursive: true });
+
+  const actorA = JSON.parse(await fs.readFile(path.join(fixtureRoot, "worlds", worldId, "actors", "actorA.json"), "utf-8"));
+  const actorB = JSON.parse(await fs.readFile(path.join(fixtureRoot, "worlds", worldId, "actors", "actorB.json"), "utf-8"));
+
+  const actorAFile = `worlds/${worldId}/vaultsync/exports/actors/actor.actorA.1000.test.json`;
+  const actorBFile = `worlds/${worldId}/vaultsync/exports/actors/actor.actorB.1001.test.json`;
+
+  await fs.writeFile(path.join(fixtureRoot, actorAFile), JSON.stringify({
+    type: "export",
+    docType: "Actor",
+    uuid: "Actor.actorA",
+    externalId: "vh:Actor:actorA",
+    foundry: actorA,
+    exportedAt: "2026-03-11T00:00:00.000Z",
+  }, null, 2));
+
+  await fs.writeFile(path.join(fixtureRoot, actorBFile), JSON.stringify({
+    type: "export",
+    docType: "Actor",
+    uuid: "Actor.actorB",
+    externalId: "vh:Actor:actorB",
+    foundry: actorB,
+    exportedAt: "2026-03-11T00:00:01.000Z",
+  }, null, 2));
+
+  await fs.writeFile(path.join(manifestDir, "index.1002.test.json"), JSON.stringify({
+    worldId,
+    generatedAt: "2026-03-11T00:00:02.000Z",
+    actors: {
+      actorA: {
+        id: "actorA",
+        key: "actorA",
+        uuid: "Actor.actorA",
+        externalId: "vh:Actor:actorA",
+        name: actorA.name,
+        type: actorA.type,
+        latestFile: actorAFile,
+        updatedAt: "2026-03-11T00:00:00.000Z",
+        exportedAt: "2026-03-11T00:00:00.000Z",
+      },
+      actorB: {
+        id: "actorB",
+        key: "actorB",
+        uuid: "Actor.actorB",
+        externalId: "vh:Actor:actorB",
+        name: actorB.name,
+        type: actorB.type,
+        latestFile: actorBFile,
+        updatedAt: "2026-03-11T00:00:01.000Z",
+        exportedAt: "2026-03-11T00:00:01.000Z",
+      }
+    }
+  }, null, 2));
+}
+
 describe("auth + authz (session + api key)", () => {
   let app: ReturnType<typeof createApp>;
   let agent: request.SuperAgentTest;
@@ -65,6 +146,7 @@ describe("auth + authz (session + api key)", () => {
   beforeAll(async () => {
     // Ensure DB schema exists
     migrate();
+    await ensureActorsExportFixtures();
 
     // Bootstrap admin (expected to exist after this)
     // Prefer returning a temp password from bootstrap for tests.
@@ -75,6 +157,15 @@ describe("auth + authz (session + api key)", () => {
       vaultRoot: fixtureRoot,
       apiKey,
       authStore,
+      worldStore: new WorldStore(fixtureRoot),
+      actorsStore: new ActorsStore({
+        dataRoot: fixtureRoot,
+        vaultDirName: "vault",
+        allowLegacyWorldRoot: true,
+      }),
+      importsStore: new ImportsStore({
+        dataRoot: fixtureRoot
+      }),
       allowUnauthedPaths: ["/health", "/auth/login", "/auth/reset-password", "/invites/redeem"],
       sessionConfig,
       logger
@@ -181,8 +272,8 @@ describe("auth + authz (session + api key)", () => {
     expect(loginRes.status).toBe(200);
     expect(loginRes.body.ok).toBe(true);
 
-    // 4) Before redeem: /auth/me/worlds should be empty (or missing the world)
-    const meWorldsBefore = await userAgent.get("/auth/me/worlds");
+    // 4) Before redeem: /me/worlds should be empty (or missing the world)
+    const meWorldsBefore = await userAgent.get("/me/worlds");
     expect(meWorldsBefore.status).toBe(200);
     expect(meWorldsBefore.body.ok).toBe(true);
     expect(Array.isArray(meWorldsBefore.body.worlds)).toBe(true);
@@ -195,12 +286,12 @@ describe("auth + authz (session + api key)", () => {
     expect(redeemRes.body.foundryUserId).toBe("foundry-user-2");
 
     // 6) After redeem: /auth/me/worlds includes test-world
-    const meWorldsAfter = await userAgent.get("/auth/me/worlds");
+    const meWorldsAfter = await userAgent.get("/me/worlds");
     expect(meWorldsAfter.status).toBe(200);
     expect(meWorldsAfter.body.ok).toBe(true);
 
-    const worlds = meWorldsAfter.body.worlds as Array<{ worldId: string; foundryUserId: string }>;
-    expect(worlds.some(w => w.worldId === "test-world")).toBe(true);
+    const worlds = meWorldsAfter.body.worlds as Array<{ id?: string; worldId?: string; foundryUserId: string }>;
+    expect(worlds.some(w => (w.worldId ?? w.id) === "test-world")).toBe(true);
 
     // 7) PROVE requireWorldMember works:
     // ✅ linked world should allow reads
@@ -228,5 +319,97 @@ describe("auth + authz (session + api key)", () => {
   it("wrong API key is rejected", async () => {
     const res = await apiKeyAuth(request(app).get("/worlds"), "wrong-key");
     expect([401, 403]).toContain(res.status);
+  });
+
+  it("player actor list only includes linked character actors", async () => {
+    const player = await createAndLoginUser(app, "actors");
+    authStore.linkUserToWorld({
+      vaultUserId: player.userId,
+      worldId: "test-world",
+      foundryUserId: "foundry-user-perm-actors",
+      role: "player"
+    });
+    authStore.linkActorToUser({
+      worldId: "test-world",
+      actorId: "actorA",
+      vaultUserId: player.userId,
+      permission: "owner"
+    });
+    authStore.linkActorToUser({
+      worldId: "test-world",
+      actorId: "actorB",
+      vaultUserId: player.userId,
+      permission: "owner"
+    });
+
+    const res = await player.agent.get("/worlds/test-world/actors");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.actors)).toBe(true);
+
+    const actorIds = (res.body.actors as any[]).map((actor: any) => String(actor?.id ?? ""));
+    expect(actorIds).toContain("actorA");
+    expect(actorIds).not.toContain("actorB");
+    expect((res.body.actors as any[]).every((actor: any) => String(actor?.type ?? "").toLowerCase() === "character")).toBe(true);
+  });
+
+  it("player cannot open NPC actor detail even if linked", async () => {
+    const player = await createAndLoginUser(app, "npcdetail");
+    authStore.linkUserToWorld({
+      vaultUserId: player.userId,
+      worldId: "test-world",
+      foundryUserId: "foundry-user-perm-npc",
+      role: "player"
+    });
+    authStore.linkActorToUser({
+      worldId: "test-world",
+      actorId: "actorB",
+      vaultUserId: player.userId,
+      permission: "owner"
+    });
+
+    const res = await player.agent.get("/worlds/test-world/actors/actorB");
+    expect(res.status).toBe(403);
+  });
+
+  it("party endpoint returns summary-safe character rows for players", async () => {
+    const player = await createAndLoginUser(app, "party");
+    authStore.linkUserToWorld({
+      vaultUserId: player.userId,
+      worldId: "test-world",
+      foundryUserId: "foundry-user-perm-party",
+      role: "player"
+    });
+    authStore.linkActorToUser({
+      worldId: "test-world",
+      actorId: "actorA",
+      vaultUserId: player.userId,
+      permission: "owner"
+    });
+
+    const res = await player.agent.get("/worlds/test-world/party");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(Array.isArray(res.body.party)).toBe(true);
+
+    const ids = (res.body.party as any[]).map((row: any) => String(row?.id ?? ""));
+    expect(ids).toContain("actorA");
+    expect(ids).not.toContain("actorB");
+
+    const row = (res.body.party as any[]).find((entry: any) => String(entry?.id ?? "") === "actorA");
+    expect(row).toEqual(
+      expect.objectContaining({
+        id: "actorA",
+        name: expect.any(String),
+        ownerNames: expect.any(String),
+        ownerIds: expect.any(Array),
+        activeMember: expect.any(Boolean),
+        deceased: expect.any(Boolean),
+        location: expect.any(String)
+      })
+    );
+    expect(row.system).toBeUndefined();
+    expect(row.items).toBeUndefined();
+    expect(row.effects).toBeUndefined();
+    expect(row.ownership).toBeUndefined();
   });
 });

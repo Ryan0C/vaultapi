@@ -1,0 +1,13 @@
+{
+  "type": "export",
+  "docType": "Actor",
+  "uuid": "Actor.actorB",
+  "externalId": "vh:Actor:actorB",
+  "foundry": {
+    "id": "actorB",
+    "name": "Goblin Tester",
+    "type": "npc",
+    "system": {}
+  },
+  "exportedAt": "2026-03-11T00:00:01.000Z"
+}
