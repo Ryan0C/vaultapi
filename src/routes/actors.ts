@@ -159,6 +159,11 @@ function summarizePartyActor(actor: any, worldId: string, authStore: any) {
   };
 }
 
+function isCharacterSnapshot(actor: any): boolean {
+  const unwrapped = unwrapActorSnapshot(actor);
+  return String(unwrapped?.type ?? "").toLowerCase() === "character";
+}
+
 // Minimal shape the router needs from the new store
 type ActorsStore = {
   readActorsManifest(worldId: string): Promise<any | null>;
@@ -247,7 +252,9 @@ export function makeActorsRouter(deps: CreateAppDeps) {
       const allowed = new Set(links.map((l) => l.actorId));
 
       const actors = Array.isArray((manifest as any).actors) ? (manifest as any).actors : [];
-      const filteredActors = actors.filter((a: any) => allowed.has(String(a?.id ?? "")));
+      const filteredActors = actors.filter((a: any) =>
+        allowed.has(String(a?.id ?? "")) && String(a?.type ?? "").toLowerCase() === "character"
+      );
 
       return res.json({
         ...(manifest as any),
@@ -308,7 +315,9 @@ export function makeActorsRouter(deps: CreateAppDeps) {
       if (userId && !authStore.isWorldDm(worldId, userId)) {
         const links = authStore.listActorsForUserInWorld(worldId, userId);
         const allowed = new Set(links.map((l) => l.actorId));
-        changed = changed.filter((a: any) => allowed.has(String(a?.id ?? "")));
+        changed = changed.filter((a: any) =>
+          allowed.has(String(a?.id ?? "")) && String(a?.type ?? "").toLowerCase() === "character"
+        );
       }
 
       return res.json({ ok: true, worldId, since, count: changed.length, actors: changed });
@@ -376,6 +385,13 @@ export function makeActorsRouter(deps: CreateAppDeps) {
       const actor = await actorsStore.readActor(worldId, actorId);
       if (!actor) {
         return res.status(404).json({ ok: false, error: "Actor not found" });
+      }
+
+      if (!isApiKeySuperuser(anyReq)) {
+        const userId = getVaultUserId(anyReq);
+        if (userId && !authStore.isWorldDm(worldId, userId) && !isCharacterSnapshot(actor)) {
+          return next(forbidden("Actor access denied"));
+        }
       }
 
       return res.json({ ok: true, actor: unwrapActorSnapshot(actor, actorId) });

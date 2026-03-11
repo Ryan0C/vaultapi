@@ -1,0 +1,13 @@
+{
+  "type": "export",
+  "docType": "Actor",
+  "uuid": "Actor.actorA",
+  "externalId": "vh:Actor:actorA",
+  "foundry": {
+    "id": "actorA",
+    "name": "Sir Testalot",
+    "type": "character",
+    "system": {}
+  },
+  "exportedAt": "2026-03-11T00:00:00.000Z"
+}

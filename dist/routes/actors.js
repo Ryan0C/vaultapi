@@ -141,6 +141,10 @@ function summarizePartyActor(actor, worldId, authStore) {
         location: actorLocation(unwrapped),
     };
 }
+function isCharacterSnapshot(actor) {
+    const unwrapped = unwrapActorSnapshot(actor);
+    return String(unwrapped?.type ?? "").toLowerCase() === "character";
+}
 export function makeActorsRouter(deps) {
     const router = Router();
     const { authStore, actorsStore } = deps;
@@ -206,7 +210,7 @@ export function makeActorsRouter(deps) {
             const links = authStore.listActorsForUserInWorld(worldId, userId);
             const allowed = new Set(links.map((l) => l.actorId));
             const actors = Array.isArray(manifest.actors) ? manifest.actors : [];
-            const filteredActors = actors.filter((a) => allowed.has(String(a?.id ?? "")));
+            const filteredActors = actors.filter((a) => allowed.has(String(a?.id ?? "")) && String(a?.type ?? "").toLowerCase() === "character");
             return res.json({
                 ...manifest,
                 actors: filteredActors,
@@ -262,7 +266,7 @@ export function makeActorsRouter(deps) {
             if (userId && !authStore.isWorldDm(worldId, userId)) {
                 const links = authStore.listActorsForUserInWorld(worldId, userId);
                 const allowed = new Set(links.map((l) => l.actorId));
-                changed = changed.filter((a) => allowed.has(String(a?.id ?? "")));
+                changed = changed.filter((a) => allowed.has(String(a?.id ?? "")) && String(a?.type ?? "").toLowerCase() === "character");
             }
             return res.json({ ok: true, worldId, since, count: changed.length, actors: changed });
         }
@@ -323,6 +327,12 @@ export function makeActorsRouter(deps) {
             const actor = await actorsStore.readActor(worldId, actorId);
             if (!actor) {
                 return res.status(404).json({ ok: false, error: "Actor not found" });
+            }
+            if (!isApiKeySuperuser(anyReq)) {
+                const userId = getVaultUserId(anyReq);
+                if (userId && !authStore.isWorldDm(worldId, userId) && !isCharacterSnapshot(actor)) {
+                    return next(forbidden("Actor access denied"));
+                }
             }
             return res.json({ ok: true, actor: unwrapActorSnapshot(actor, actorId) });
         }
