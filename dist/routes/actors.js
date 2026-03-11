@@ -34,6 +34,113 @@ function unwrapActorSnapshot(actor, actorIdHint) {
         out._id = actorIdHint;
     return out;
 }
+function readNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+function resolveItemName(raw, items, types) {
+    if (!raw)
+        return "";
+    const normalizedTypes = new Set(types.map((t) => String(t).toLowerCase()));
+    const actorItems = Array.isArray(items) ? items : [];
+    if (typeof raw === "string") {
+        const byId = actorItems.find((it) => normalizedTypes.has(String(it?.type ?? "").toLowerCase()) &&
+            String(it?._id ?? it?.id ?? "").trim() === raw);
+        if (byId?.name)
+            return String(byId.name).trim();
+        return raw.trim();
+    }
+    const embeddedId = String(raw?._id ?? raw?.id ?? "").trim();
+    if (embeddedId) {
+        const byId = actorItems.find((it) => normalizedTypes.has(String(it?.type ?? "").toLowerCase()) &&
+            String(it?._id ?? it?.id ?? "").trim() === embeddedId);
+        if (byId?.name)
+            return String(byId.name).trim();
+    }
+    return String(raw?.name ?? raw?.label ?? raw?.value ?? "").trim();
+}
+function actorLevel(actor) {
+    const direct = readNumber(actor?.system?.details?.level);
+    if (direct != null)
+        return Math.max(0, Math.trunc(direct));
+    const classItems = (Array.isArray(actor?.items) ? actor.items : []).filter((it) => String(it?.type ?? "").toLowerCase() === "class");
+    if (!classItems.length)
+        return null;
+    let total = 0;
+    for (const item of classItems) {
+        const level = readNumber(item?.system?.levels ?? item?.system?.level ?? 0) ?? 0;
+        total += Math.max(0, Math.trunc(level));
+    }
+    return total > 0 ? total : null;
+}
+function actorSpecies(actor) {
+    const items = Array.isArray(actor?.items) ? actor.items : [];
+    const raw = actor?.system?.details?.species ?? actor?.system?.details?.race ?? "";
+    return resolveItemName(raw, items, ["species", "race"]);
+}
+function actorClass(actor) {
+    const direct = String(actor?.system?.details?.class ?? "").trim();
+    if (direct)
+        return direct;
+    const names = (Array.isArray(actor?.items) ? actor.items : [])
+        .filter((it) => String(it?.type ?? "").toLowerCase() === "class")
+        .map((it) => String(it?.name ?? "").trim())
+        .filter(Boolean);
+    return names.join(" / ");
+}
+function actorImage(actor) {
+    return String(actor?.img ??
+        actor?.prototypeToken?.texture?.src ??
+        actor?.prototypeToken?.src ??
+        "").trim();
+}
+function actorLocation(actor) {
+    return String(actor?.flags?.vaulthero?.location ?? "").trim();
+}
+function actorDeceased(actor) {
+    const hpVal = readNumber(actor?.system?.attributes?.hp?.value);
+    const hpMax = readNumber(actor?.system?.attributes?.hp?.max);
+    if (hpVal != null && hpMax != null && hpMax > 0 && hpVal <= 0)
+        return true;
+    const effects = Array.isArray(actor?.effects) ? actor.effects : [];
+    return effects.some((effect) => {
+        const status = String(effect?.flags?.core?.statusId ?? "").toLowerCase() ||
+            String(Array.isArray(effect?.statuses) ? effect.statuses[0] ?? "" : "").toLowerCase() ||
+            String(effect?.label ?? effect?.name ?? "").toLowerCase();
+        return status.includes("dead") || status.includes("deceased") || status.includes("defeated");
+    });
+}
+function actorOwnerFallback(actor) {
+    const ownership = actor?.ownership;
+    if (ownership && Number(ownership.default ?? 0) >= 3)
+        return "All Players";
+    return "Unknown";
+}
+function summarizePartyActor(actor, worldId, authStore) {
+    const unwrapped = unwrapActorSnapshot(actor);
+    const actorId = String(unwrapped?.id ?? unwrapped?._id ?? "").trim();
+    if (!actorId)
+        return null;
+    if (String(unwrapped?.type ?? "").toLowerCase() !== "character")
+        return null;
+    const owners = authStore.listUsersForActorInWorld(worldId, actorId);
+    const ownerNames = owners
+        .map((owner) => String(owner?.displayName ?? owner?.username ?? "").trim())
+        .filter(Boolean);
+    return {
+        id: actorId,
+        name: String(unwrapped?.name ?? actorId).trim() || actorId,
+        img: actorImage(unwrapped),
+        level: actorLevel(unwrapped),
+        species: actorSpecies(unwrapped),
+        className: actorClass(unwrapped),
+        ownerIds: owners.map((owner) => String(owner?.userId ?? "").trim()).filter(Boolean),
+        ownerNames: ownerNames.length ? Array.from(new Set(ownerNames)).join(", ") : actorOwnerFallback(unwrapped),
+        activeMember: Boolean(unwrapped?.flags?.vaulthero?.party?.activeMember),
+        deceased: actorDeceased(unwrapped),
+        location: actorLocation(unwrapped),
+    };
+}
 export function makeActorsRouter(deps) {
     const router = Router();
     const { authStore, actorsStore } = deps;
@@ -158,6 +265,28 @@ export function makeActorsRouter(deps) {
                 changed = changed.filter((a) => allowed.has(String(a?.id ?? "")));
             }
             return res.json({ ok: true, worldId, since, count: changed.length, actors: changed });
+        }
+        catch (err) {
+            next(err);
+        }
+    });
+    router.get("/:worldId/party", requireWorldMember, async (req, res, next) => {
+        try {
+            const worldId = asParamString(req.params.worldId);
+            const manifest = await actorsStore.readActorsManifest(worldId);
+            const manifestActors = Array.isArray(manifest?.actors) ? manifest.actors : [];
+            const actorIds = manifestActors.length
+                ? manifestActors.map((actor) => String(actor?.id ?? actor?._id ?? "").trim()).filter(Boolean)
+                : await actorsStore.listActorIds(worldId);
+            const summaries = await Promise.all(Array.from(new Set(actorIds)).map(async (actorId) => {
+                const actor = await actorsStore.readActor(worldId, actorId);
+                return summarizePartyActor(actor, worldId, authStore);
+            }));
+            return res.json({
+                ok: true,
+                worldId,
+                party: summaries.filter(Boolean),
+            });
         }
         catch (err) {
             next(err);

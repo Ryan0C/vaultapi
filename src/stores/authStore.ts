@@ -424,6 +424,27 @@ export class AuthStore {
     `).all(worldId, vaultUserId) as any;
   }
 
+  listUsersForActorInWorld(worldId: string, actorId: string): Array<{
+    userId: string;
+    permission: ActorPermission;
+    username: string | null;
+    displayName: string | null;
+    linkedAt: string;
+  }> {
+    return db.prepare(`
+      SELECT
+        wal.vault_user_id AS userId,
+        wal.permission AS permission,
+        vu.username AS username,
+        vu.display_name AS displayName,
+        wal.linked_at AS linkedAt
+      FROM world_actor_links wal
+      LEFT JOIN vault_users vu ON vu.id = wal.vault_user_id
+      WHERE wal.world_id=? AND wal.actor_id=?
+      ORDER BY wal.linked_at DESC
+    `).all(worldId, actorId) as any;
+  }
+
   linkUserToWorld(args: {
     vaultUserId: string;
     worldId: string;
