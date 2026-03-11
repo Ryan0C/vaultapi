@@ -8,7 +8,8 @@ function nowIso() {
 function sha256(s) {
     return createHash("sha256").update(s).digest("hex");
 }
-const USERNAME_RE = /^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])?$/;
+// 2-32 chars, lowercase letters/numbers plus . _ - in the middle.
+const USERNAME_RE = /^[a-z0-9](?:[a-z0-9._-]{0,30}[a-z0-9])$/;
 function normalizeUsername(input) {
     return String(input ?? "").trim().toLowerCase();
 }
