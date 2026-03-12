@@ -8,6 +8,12 @@ type ItemsPacksStore = {
   listPackIds(worldId: string): Promise<string[]>;
   getPackMeta(worldId: string, packId: string): Promise<any | null>;
   readLatestPackIndex(worldId: string, packId: string): Promise<any | null>;
+  readBuilderChoices(worldId: string): Promise<{
+    classes: any[];
+    subclasses: any[];
+    species: any[];
+    backgrounds: any[];
+  }>;
   searchPackEntries(args: {
     worldId: string;
     packId: string;
@@ -70,6 +76,33 @@ export function makePacksRouter(deps: CreateAppDeps) {
         worldId,
         count: packs.length,
         packs,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * GET /worlds/:worldId/packs/builder-choices
+   * Aggregated character-builder options in one response.
+   */
+  router.get("/:worldId/packs/builder-choices", requireWorldMember, async (req, res, next) => {
+    try {
+      const { worldId } = req.params;
+      deps.logger.info("packs.builderChoices", { worldId });
+
+      const choices = await itemsPacksStore.readBuilderChoices(worldId);
+      res.setHeader("Cache-Control", "private, max-age=60, stale-while-revalidate=120");
+
+      return res.json({
+        ok: true,
+        worldId,
+        count:
+          choices.classes.length +
+          choices.subclasses.length +
+          choices.species.length +
+          choices.backgrounds.length,
+        ...choices,
       });
     } catch (err) {
       next(err);

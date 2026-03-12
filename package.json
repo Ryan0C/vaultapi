@@ -8,7 +8,9 @@
     "dev": "tsx watch src/server.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "cleanup:avatars": "tsx src/scripts/cleanupAvatarUploads.ts",
+    "cleanup:avatars:apply": "tsx src/scripts/cleanupAvatarUploads.ts --apply"
   },
   "author": "",
   "license": "ISC",
@@ -23,6 +25,7 @@
     "express-session": "^1.19.0",
     "fastify": "^5.7.4",
     "multer": "^2.0.2",
+    "sharp": "^0.34.5",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

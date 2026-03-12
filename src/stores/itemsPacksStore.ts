@@ -131,6 +131,15 @@ type CompiledEntry = {
   hay: string;
 };
 type CompiledCacheEntry = { value: CompiledEntry[]; exp: number };
+type BuilderChoicesCacheEntry = {
+  value: {
+    classes: any[];
+    subclasses: any[];
+    species: any[];
+    backgrounds: any[];
+  };
+  exp: number;
+};
 
 export class ItemsPacksStore {
   constructor(private opts: ItemsPacksStoreOptions) {}
@@ -144,6 +153,7 @@ export class ItemsPacksStore {
   private _cache = new Map<string, CacheEntry>();
   private _searchCache = new Map<string, SearchCacheEntry>();
   private _compiledCache = new Map<string, CompiledCacheEntry>();
+  private _builderChoicesCache = new Map<string, BuilderChoicesCacheEntry>();
   private readonly CACHE_TTL_MS = 5 * 60_000; // 5 minutes
   private readonly SEARCH_CACHE_TTL_MS = 30_000; // 30 seconds
 
@@ -186,6 +196,9 @@ export class ItemsPacksStore {
     }
     for (const k of this._compiledCache.keys()) {
       if (k.startsWith(prefix)) this._compiledCache.delete(k);
+    }
+    for (const k of this._builderChoicesCache.keys()) {
+      if (k.startsWith(prefix)) this._builderChoicesCache.delete(k);
     }
   }
 
@@ -272,6 +285,129 @@ export class ItemsPacksStore {
     };
   }
 
+  private compileEntries(entries: any[]): CompiledEntry[] {
+    return entries.map((e: any): CompiledEntry => {
+      const name = String(e?.name ?? "");
+      const sys = e?.system ?? {};
+      const vhSpell = e?.vh?.spell ?? {};
+      const classes = Array.isArray(vhSpell?.classes)
+        ? vhSpell.classes
+            .map((x: any) => normalizeClassToken(x))
+            .filter(Boolean)
+        : [];
+      const subclasses = Array.isArray(vhSpell?.subclasses)
+        ? vhSpell.subclasses
+            .map((x: any) => String(x).toLowerCase().trim())
+            .filter(Boolean)
+        : [];
+      const classesFromSubclasses = subclasses
+        .map((x: any) => inferClassFromSubclassToken(x))
+        .filter(Boolean);
+      const classesFromText = Array.from(
+        inferClassesFromText(
+          [
+            sys?.description?.value,
+            sys?.description?.chat,
+            vhSpell?.source,
+          ].join(" ")
+        )
+      );
+      const resolvedClasses = Array.from(new Set([...classes, ...classesFromSubclasses, ...classesFromText]));
+      const hay = [
+        name,
+        sys?.identifier,
+        ...resolvedClasses,
+        ...subclasses,
+        vhSpell?.source,
+        sys?.description?.value,
+        sys?.description?.chat,
+      ]
+        .map((v: any) => String(v ?? "").toLowerCase())
+        .join(" ");
+      return {
+        raw: e,
+        name,
+        typeSet: normalizedTypeSet(e),
+        level:
+          Number.isFinite(Number(vhSpell?.level))
+            ? Number(vhSpell.level)
+            : Number.isFinite(Number(sys?.level))
+              ? Number(sys.level)
+              : undefined,
+        school: String(vhSpell?.school ?? sys?.school ?? "").toLowerCase(),
+        classes: new Set(resolvedClasses),
+        subclasses: new Set(subclasses),
+        concentration:
+          typeof vhSpell?.concentration === "boolean" ? vhSpell.concentration : undefined,
+        ritual: typeof vhSpell?.ritual === "boolean" ? vhSpell.ritual : undefined,
+        hay,
+      };
+    });
+  }
+
+  private async getCompiledEntries(worldId: string, packId: string): Promise<CompiledEntry[]> {
+    const idx = await this.readLatestPackIndex(worldId, packId);
+    const entries = Array.isArray(idx?.entries) ? idx.entries : [];
+    const compiledKey = `${worldId}:${packId}:compiled`;
+    let compiled = this._compiledGet(compiledKey);
+    if (!compiled) {
+      compiled = this.compileEntries(entries);
+      this._compiledSet(compiledKey, compiled);
+    }
+    return compiled;
+  }
+
+  async readBuilderChoices(worldId: string): Promise<{
+    classes: any[];
+    subclasses: any[];
+    species: any[];
+    backgrounds: any[];
+  }> {
+    const cacheKey = `${worldId}:builderChoices`;
+    const cached = this._builderChoicesCache.get(cacheKey);
+    if (cached && cached.exp > Date.now()) return cached.value;
+
+    const packIds = await this.listPackIds(worldId);
+    const classes: any[] = [];
+    const subclasses: any[] = [];
+    const species: any[] = [];
+    const backgrounds: any[] = [];
+
+    for (const packId of packIds) {
+      const compiled = await this.getCompiledEntries(worldId, packId);
+      for (const row of compiled) {
+        const entry = row.raw;
+        const name = String(row.name ?? "").trim();
+        if (!name) continue;
+        const typeSet = row.typeSet;
+        const base = {
+          packId,
+          uuid: String(entry?.uuid ?? ""),
+          _id: entry?._id,
+          name,
+          type: entry?.type != null ? String(entry.type) : undefined,
+          img: entry?.img != null ? String(entry.img) : undefined,
+          system: {
+            identifier: entry?.system?.identifier,
+            classIdentifier: entry?.system?.classIdentifier,
+            description: { value: entry?.system?.description?.value },
+          },
+        };
+        if (typeSet.has("class")) classes.push(base);
+        else if (typeSet.has("subclass")) subclasses.push(base);
+        else if (typeSet.has("background")) backgrounds.push(base);
+        else if (typeSet.has("species") || typeSet.has("race")) species.push(base);
+      }
+    }
+
+    const value = { classes, subclasses, species, backgrounds };
+    this._builderChoicesCache.set(cacheKey, {
+      value,
+      exp: Date.now() + this.CACHE_TTL_MS,
+    });
+    return value;
+  }
+
   async searchPackEntries(args: {
     worldId: string;
     packId: string;
@@ -303,70 +439,7 @@ export class ItemsPacksStore {
     const cached = this._searchCache.get(cacheKey);
     if (cached && cached.exp > Date.now()) return cached.value;
 
-    const idx = await this.readLatestPackIndex(args.worldId, args.packId);
-    const entries = Array.isArray(idx?.entries) ? idx.entries : [];
-    const compiledKey = `${args.worldId}:${args.packId}:compiled`;
-    let compiled = this._compiledGet(compiledKey);
-    if (!compiled) {
-      compiled = entries.map((e: any): CompiledEntry => {
-        const name = String(e?.name ?? "");
-        const sys = e?.system ?? {};
-        const vhSpell = e?.vh?.spell ?? {};
-        const classes = Array.isArray(vhSpell?.classes)
-          ? vhSpell.classes
-              .map((x: any) => normalizeClassToken(x))
-              .filter(Boolean)
-          : [];
-        const subclasses = Array.isArray(vhSpell?.subclasses)
-          ? vhSpell.subclasses
-              .map((x: any) => String(x).toLowerCase().trim())
-              .filter(Boolean)
-          : [];
-        const classesFromSubclasses = subclasses
-          .map((x: any) => inferClassFromSubclassToken(x))
-          .filter(Boolean);
-        const classesFromText = Array.from(
-          inferClassesFromText(
-            [
-              sys?.description?.value,
-              sys?.description?.chat,
-              vhSpell?.source,
-            ].join(" ")
-          )
-        );
-        const resolvedClasses = Array.from(new Set([...classes, ...classesFromSubclasses, ...classesFromText]));
-        const hay = [
-          name,
-          sys?.identifier,
-          ...resolvedClasses,
-          ...subclasses,
-          vhSpell?.source,
-          sys?.description?.value,
-          sys?.description?.chat,
-        ]
-          .map((v: any) => String(v ?? "").toLowerCase())
-          .join(" ");
-        return {
-          raw: e,
-          name,
-          typeSet: normalizedTypeSet(e),
-          level:
-            Number.isFinite(Number(vhSpell?.level))
-              ? Number(vhSpell.level)
-              : Number.isFinite(Number(sys?.level))
-                ? Number(sys.level)
-                : undefined,
-          school: String(vhSpell?.school ?? sys?.school ?? "").toLowerCase(),
-          classes: new Set(resolvedClasses),
-          subclasses: new Set(subclasses),
-          concentration:
-            typeof vhSpell?.concentration === "boolean" ? vhSpell.concentration : undefined,
-          ritual: typeof vhSpell?.ritual === "boolean" ? vhSpell.ritual : undefined,
-          hay,
-        };
-      });
-      this._compiledSet(compiledKey, compiled);
-    }
+    const compiled = await this.getCompiledEntries(args.worldId, args.packId);
 
     const hits: any[] = [];
 

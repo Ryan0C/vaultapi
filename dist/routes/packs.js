@@ -49,6 +49,30 @@ export function makePacksRouter(deps) {
         }
     });
     /**
+     * GET /worlds/:worldId/packs/builder-choices
+     * Aggregated character-builder options in one response.
+     */
+    router.get("/:worldId/packs/builder-choices", requireWorldMember, async (req, res, next) => {
+        try {
+            const { worldId } = req.params;
+            deps.logger.info("packs.builderChoices", { worldId });
+            const choices = await itemsPacksStore.readBuilderChoices(worldId);
+            res.setHeader("Cache-Control", "private, max-age=60, stale-while-revalidate=120");
+            return res.json({
+                ok: true,
+                worldId,
+                count: choices.classes.length +
+                    choices.subclasses.length +
+                    choices.species.length +
+                    choices.backgrounds.length,
+                ...choices,
+            });
+        }
+        catch (err) {
+            next(err);
+        }
+    });
+    /**
      * GET /worlds/:worldId/packs/:packId/index
      */
     router.get("/:worldId/packs/:packId/index", requireWorldMember, async (req, res, next) => {
