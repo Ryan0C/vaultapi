@@ -231,7 +231,7 @@ describe("auth + authz (session + api key)", () => {
         expect(meWorldsAfter.status).toBe(200);
         expect(meWorldsAfter.body.ok).toBe(true);
         const worlds = meWorldsAfter.body.worlds;
-        expect(worlds.some(w => w.worldId === "test-world")).toBe(true);
+        expect(worlds.some(w => (w.worldId ?? w.id) === "test-world")).toBe(true);
         // 7) PROVE requireWorldMember works:
         // ✅ linked world should allow reads
         const actorsOk = await userAgent.get("/worlds/test-world/actors");

@@ -5,12 +5,10 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import multer from "multer";
 import crypto from "node:crypto";
+import sharp from "sharp";
 import type { CreateAppDeps } from "../app.js";
 import { makeRequireUser } from "../middleware/authz.js";
 import { forbidden } from "../utils/errors.js";
-
-// If you want: use sharp to convert/resize to webp
-// import sharp from "sharp";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -23,6 +21,24 @@ const upload = multer({
 
 function safeId(s: string) {
   return String(s ?? "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+}
+
+async function normalizeUploadedImage(input: Buffer, kind: string): Promise<Buffer> {
+  const pipeline = sharp(input, { failOn: "warning" }).rotate();
+
+  if (kind === "avatar") {
+    pipeline.resize({
+      width: 768,
+      height: 768,
+      fit: "inside",
+      withoutEnlargement: true,
+    });
+  }
+
+  return pipeline.webp({
+    quality: kind === "avatar" ? 80 : 82,
+    effort: 4,
+  }).toBuffer();
 }
 
 export function makeUploadsRouter(deps: CreateAppDeps) {
@@ -59,15 +75,8 @@ export function makeUploadsRouter(deps: CreateAppDeps) {
 
         const absFile = path.join(absDir, baseName);
 
-        // If you want to normalize/resize to 600px width:
-        // const out = await sharp(req.file.buffer)
-        //   .resize({ width: 600, withoutEnlargement: true })
-        //   .webp({ quality: 82 })
-        //   .toBuffer();
-        // await fs.writeFile(absFile, out);
-
-        // Or store as-is (less ideal)
-        await fs.writeFile(absFile, req.file.buffer);
+        const out = await normalizeUploadedImage(req.file.buffer, kind);
+        await fs.writeFile(absFile, out);
 
         // This is what you send to Foundry/VaultSync
         const mediaRelPath = path.join(relDir, baseName).replace(/\\/g, "/");
