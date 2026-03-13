@@ -63,8 +63,15 @@ async function ensureActorsExportFixtures() {
     await fs.mkdir(manifestDir, { recursive: true });
     const actorA = JSON.parse(await fs.readFile(path.join(fixtureRoot, "worlds", worldId, "actors", "actorA.json"), "utf-8"));
     const actorB = JSON.parse(await fs.readFile(path.join(fixtureRoot, "worlds", worldId, "actors", "actorB.json"), "utf-8"));
+    const actorC = {
+        ...actorA,
+        _id: "actorC",
+        id: "actorC",
+        name: "Companion Character",
+    };
     const actorAFile = `worlds/${worldId}/vaultsync/exports/actors/actor.actorA.1000.test.json`;
     const actorBFile = `worlds/${worldId}/vaultsync/exports/actors/actor.actorB.1001.test.json`;
+    const actorCFile = `worlds/${worldId}/vaultsync/exports/actors/actor.actorC.1002.test.json`;
     await fs.writeFile(path.join(fixtureRoot, actorAFile), JSON.stringify({
         type: "export",
         docType: "Actor",
@@ -81,9 +88,17 @@ async function ensureActorsExportFixtures() {
         foundry: actorB,
         exportedAt: "2026-03-11T00:00:01.000Z",
     }, null, 2));
-    await fs.writeFile(path.join(manifestDir, "index.1002.test.json"), JSON.stringify({
+    await fs.writeFile(path.join(fixtureRoot, actorCFile), JSON.stringify({
+        type: "export",
+        docType: "Actor",
+        uuid: "Actor.actorC",
+        externalId: "vh:Actor:actorC",
+        foundry: actorC,
+        exportedAt: "2026-03-11T00:00:02.000Z",
+    }, null, 2));
+    await fs.writeFile(path.join(manifestDir, "index.1003.test.json"), JSON.stringify({
         worldId,
-        generatedAt: "2026-03-11T00:00:02.000Z",
+        generatedAt: "2026-03-11T00:00:03.000Z",
         actors: {
             actorA: {
                 id: "actorA",
@@ -106,6 +121,17 @@ async function ensureActorsExportFixtures() {
                 latestFile: actorBFile,
                 updatedAt: "2026-03-11T00:00:01.000Z",
                 exportedAt: "2026-03-11T00:00:01.000Z",
+            },
+            actorC: {
+                id: "actorC",
+                key: "actorC",
+                uuid: "Actor.actorC",
+                externalId: "vh:Actor:actorC",
+                name: actorC.name,
+                type: actorC.type,
+                latestFile: actorCFile,
+                updatedAt: "2026-03-11T00:00:02.000Z",
+                exportedAt: "2026-03-11T00:00:02.000Z",
             }
         }
     }, null, 2));
@@ -302,10 +328,17 @@ describe("auth + authz (session + api key)", () => {
     });
     it("party endpoint returns summary-safe character rows for players", async () => {
         const player = await createAndLoginUser(app, "party");
+        const teammate = await createAndLoginUser(app, "party-teammate");
         authStore.linkUserToWorld({
             vaultUserId: player.userId,
             worldId: "test-world",
             foundryUserId: "foundry-user-perm-party",
+            role: "player"
+        });
+        authStore.linkUserToWorld({
+            vaultUserId: teammate.userId,
+            worldId: "test-world",
+            foundryUserId: "foundry-user-perm-party-teammate",
             role: "player"
         });
         authStore.linkActorToUser({
@@ -314,27 +347,232 @@ describe("auth + authz (session + api key)", () => {
             vaultUserId: player.userId,
             permission: "owner"
         });
+        authStore.linkActorToUser({
+            worldId: "test-world",
+            actorId: "actorC",
+            vaultUserId: teammate.userId,
+            permission: "owner"
+        });
         const res = await player.agent.get("/worlds/test-world/party");
         expect(res.status).toBe(200);
         expect(res.body.ok).toBe(true);
         expect(Array.isArray(res.body.party)).toBe(true);
         const ids = res.body.party.map((row) => String(row?.id ?? ""));
         expect(ids).toContain("actorA");
+        expect(ids).toContain("actorC");
         expect(ids).not.toContain("actorB");
         const row = res.body.party.find((entry) => String(entry?.id ?? "") === "actorA");
         expect(row).toEqual(expect.objectContaining({
             id: "actorA",
             name: expect.any(String),
             ownerNames: expect.any(String),
-            ownerIds: expect.any(Array),
+            isOwnedByRequester: true,
             activeMember: expect.any(Boolean),
             deceased: expect.any(Boolean),
             location: expect.any(String)
         }));
+        const teammateRow = res.body.party.find((entry) => String(entry?.id ?? "") === "actorC");
+        expect(teammateRow).toEqual(expect.objectContaining({
+            id: "actorC",
+            ownerNames: expect.any(String),
+            isOwnedByRequester: false,
+        }));
+        expect(res.body.party.every((entry) => entry?.ownerIds === undefined)).toBe(true);
         expect(row.system).toBeUndefined();
         expect(row.items).toBeUndefined();
         expect(row.effects).toBeUndefined();
         expect(row.ownership).toBeUndefined();
+    });
+    it("dm vendor pack import merges and dedupes existing vendors/items", async () => {
+        const dm = await createAndLoginUser(app, "vendor-pack-dm");
+        const worldId = `vendor-pack-${uuid().slice(0, 8)}`;
+        authStore.linkUserToWorld({
+            vaultUserId: dm.userId,
+            worldId,
+            foundryUserId: "foundry-user-vendor-pack-dm",
+            role: "dm",
+        });
+        const unique = uuid().slice(0, 6);
+        const createRes = await dm.agent.post(`/worlds/${worldId}/vendors`).send({
+            name: `Arcane Outfitter ${unique}`,
+            description: "Test export vendor",
+            gold: 250,
+            greetings: ["Welcome, traveler."],
+        });
+        expect(createRes.status).toBe(200);
+        const vendorId = createRes.body?.vendor?.id;
+        expect(typeof vendorId).toBe("string");
+        const addItemRes = await dm.agent.post(`/worlds/${worldId}/vendors/${vendorId}/items`).send({
+            name: "Potion of Testing",
+            priceGold: 35,
+            quantity: 7,
+            maxQuantity: 10,
+            restockAmount: 1,
+            restockIntervalSeconds: 3600,
+        });
+        expect(addItemRes.status).toBe(200);
+        const exportRes = await dm.agent.get(`/worlds/${worldId}/vendor-packs/export?vendorId=${encodeURIComponent(vendorId)}`);
+        expect(exportRes.status).toBe(200);
+        expect(exportRes.body?.pack?.format).toBe("vaulthero.vendorPack");
+        expect(Array.isArray(exportRes.body?.pack?.data?.vendors)).toBe(true);
+        expect(exportRes.body.pack.data.vendors).toHaveLength(1);
+        expect(exportRes.body.pack.data.vendors[0]?.items?.length).toBe(1);
+        const modifiedPack = JSON.parse(JSON.stringify(exportRes.body.pack));
+        modifiedPack.data.vendors[0].description = "Merged description";
+        modifiedPack.data.vendors[0].items[0].priceGold = 99;
+        const importRes = await dm.agent.post(`/worlds/${worldId}/vendor-packs/import`).send({
+            pack: modifiedPack,
+        });
+        expect(importRes.status).toBe(200);
+        expect(importRes.body?.imported).toEqual(expect.objectContaining({
+            vendors: 0,
+            items: 0,
+            mergedVendors: 1,
+            mergedItems: 1,
+        }));
+        const listRes = await dm.agent.get(`/worlds/${worldId}/vendors`);
+        expect(listRes.status).toBe(200);
+        expect(Array.isArray(listRes.body?.vendors)).toBe(true);
+        expect(listRes.body.vendors.length).toBe(1);
+        const detailRes = await dm.agent.get(`/worlds/${worldId}/vendors/${vendorId}`);
+        expect(detailRes.status).toBe(200);
+        expect(detailRes.body?.vendor?.description).toBe("Merged description");
+        expect(Array.isArray(detailRes.body?.vendor?.items)).toBe(true);
+        expect(detailRes.body.vendor.items).toHaveLength(1);
+        expect(detailRes.body.vendor.items[0]?.priceGold).toBe(99);
+    });
+    it("vendor pack export with vendorId returns only requested vendor", async () => {
+        const dm = await createAndLoginUser(app, "vendor-export-scope");
+        const worldId = `vendor-scope-${uuid().slice(0, 8)}`;
+        authStore.linkUserToWorld({
+            vaultUserId: dm.userId,
+            worldId,
+            foundryUserId: "foundry-user-vendor-scope-dm",
+            role: "dm",
+        });
+        const a = await dm.agent.post(`/worlds/${worldId}/vendors`).send({ name: "Scope A", gold: 10 });
+        const b = await dm.agent.post(`/worlds/${worldId}/vendors`).send({ name: "Scope B", gold: 20 });
+        expect(a.status).toBe(200);
+        expect(b.status).toBe(200);
+        const targetId = String(a.body?.vendor?.id ?? "");
+        const exportRes = await dm.agent.get(`/worlds/${worldId}/vendor-packs/export?vendorId=${encodeURIComponent(targetId)}`);
+        expect(exportRes.status).toBe(200);
+        expect(Array.isArray(exportRes.body?.pack?.data?.vendors)).toBe(true);
+        expect(exportRes.body.pack.data.vendors).toHaveLength(1);
+        expect(String(exportRes.body.pack.data.vendors[0]?.externalId ?? "")).toBe(targetId);
+    });
+    it("vendor pack import returns 400 for invalid payloads", async () => {
+        const dm = await createAndLoginUser(app, "vendor-import-invalid");
+        const worldId = `vendor-invalid-${uuid().slice(0, 8)}`;
+        authStore.linkUserToWorld({
+            vaultUserId: dm.userId,
+            worldId,
+            foundryUserId: "foundry-user-vendor-invalid-dm",
+            role: "dm",
+        });
+        const res = await dm.agent.post(`/worlds/${worldId}/vendor-packs/import`).send({ pack: {} });
+        expect(res.status).toBe(400);
+        expect(String(res.body?.error ?? "")).toContain("data.vendors");
+    });
+    it("vendor import uses externalId precedence over name and foundryId fallbacks", async () => {
+        const dm = await createAndLoginUser(app, "vendor-import-precedence");
+        const worldId = `vendor-precedence-${uuid().slice(0, 8)}`;
+        authStore.linkUserToWorld({
+            vaultUserId: dm.userId,
+            worldId,
+            foundryUserId: "foundry-user-vendor-precedence-dm",
+            role: "dm",
+        });
+        // Vendor A (will be targeted by externalId)
+        const va = await dm.agent.post(`/worlds/${worldId}/vendors`).send({
+            name: "Vendor A",
+            description: "A-before",
+            gold: 100,
+        });
+        // Vendor B (name collision target for fallback)
+        const vb = await dm.agent.post(`/worlds/${worldId}/vendors`).send({
+            name: "Vendor B",
+            description: "B-before",
+            gold: 200,
+        });
+        expect(va.status).toBe(200);
+        expect(vb.status).toBe(200);
+        const vendorAId = String(va.body?.vendor?.id ?? "");
+        const vendorBId = String(vb.body?.vendor?.id ?? "");
+        // Create two items in Vendor A.
+        const itemA = await dm.agent.post(`/worlds/${worldId}/vendors/${vendorAId}/items`).send({
+            name: "Item A",
+            foundryItemId: "FA",
+            priceGold: 10,
+            quantity: 3,
+        });
+        const itemB = await dm.agent.post(`/worlds/${worldId}/vendors/${vendorAId}/items`).send({
+            name: "Item B",
+            foundryItemId: "FB",
+            priceGold: 20,
+            quantity: 4,
+        });
+        expect(itemA.status).toBe(200);
+        expect(itemB.status).toBe(200);
+        const itemAId = String(itemA.body?.item?.id ?? "");
+        // Import pack should match Vendor A by externalId even though name points to Vendor B,
+        // and match Item A by externalId even though foundryItemId points to Item B's foundry id.
+        const pack = {
+            format: "vaulthero.vendorPack",
+            version: 1,
+            data: {
+                vendors: [
+                    {
+                        externalId: vendorAId,
+                        name: "Vendor B",
+                        description: "A-after",
+                        gold: 777,
+                        isActive: true,
+                        greetings: [],
+                        items: [
+                            {
+                                externalId: itemAId,
+                                name: "Item A Updated",
+                                foundryItemId: "FB",
+                                priceGold: 99,
+                                quantity: 8,
+                                maxQuantity: 8,
+                                restockIntervalSeconds: 0,
+                                restockAmount: 1,
+                                sortOrder: 0,
+                            },
+                        ],
+                    },
+                ],
+            },
+        };
+        const importRes = await dm.agent.post(`/worlds/${worldId}/vendor-packs/import`).send({ pack });
+        expect(importRes.status).toBe(200);
+        expect(importRes.body?.imported).toEqual(expect.objectContaining({
+            vendors: 0,
+            items: 0,
+            mergedVendors: 1,
+            mergedItems: 1,
+        }));
+        const list = await dm.agent.get(`/worlds/${worldId}/vendors`);
+        expect(list.status).toBe(200);
+        const vendorsList = Array.isArray(list.body?.vendors) ? list.body.vendors : [];
+        expect(vendorsList).toHaveLength(2);
+        const vendorA = vendorsList.find((v) => String(v?.id ?? "") === vendorAId);
+        const vendorB = vendorsList.find((v) => String(v?.id ?? "") === vendorBId);
+        expect(vendorA?.description).toBe("A-after");
+        expect(Number(vendorA?.gold ?? 0)).toBe(777);
+        expect(vendorB?.description).toBe("B-before");
+        expect(Number(vendorB?.gold ?? 0)).toBe(200);
+        const detail = await dm.agent.get(`/worlds/${worldId}/vendors/${vendorAId}`);
+        expect(detail.status).toBe(200);
+        const items = Array.isArray(detail.body?.vendor?.items) ? detail.body.vendor.items : [];
+        expect(items).toHaveLength(2);
+        const updatedItem = items.find((i) => String(i?.id ?? "") === itemAId);
+        const untouchedItemB = items.find((i) => String(i?.name ?? "") === "Item B");
+        expect(updatedItem?.name).toBe("Item A Updated");
+        expect(Number(updatedItem?.priceGold ?? 0)).toBe(99);
+        expect(Number(untouchedItemB?.priceGold ?? 0)).toBe(20);
     });
 });
 //# sourceMappingURL=auth.test.js.map

@@ -118,13 +118,19 @@ function actorOwnerFallback(actor: any): string {
   return "Unknown";
 }
 
-export function summarizePartyActor(actor: any, worldId: string, authStore: any) {
+export function summarizePartyActor(
+  actor: any,
+  worldId: string,
+  authStore: any,
+  requesterUserId: string | null = null
+) {
   const unwrapped = unwrapActorSnapshot(actor);
   const actorId = String(unwrapped?.id ?? unwrapped?._id ?? "").trim();
   if (!actorId) return null;
   if (String(unwrapped?.type ?? "").toLowerCase() !== "character") return null;
 
   const owners = authStore.listUsersForActorInWorld(worldId, actorId);
+  const ownerIds = owners.map((owner: any) => String(owner?.userId ?? "").trim()).filter(Boolean);
   const ownerNames = owners
     .map((owner: any) => String(owner?.displayName ?? owner?.username ?? "").trim())
     .filter(Boolean);
@@ -136,7 +142,7 @@ export function summarizePartyActor(actor: any, worldId: string, authStore: any)
     level: actorLevel(unwrapped),
     species: actorSpecies(unwrapped),
     className: actorClass(unwrapped),
-    ownerIds: owners.map((owner: any) => String(owner?.userId ?? "").trim()).filter(Boolean),
+    isOwnedByRequester: !!requesterUserId && ownerIds.includes(requesterUserId),
     ownerNames: ownerNames.length ? Array.from(new Set(ownerNames)).join(", ") : actorOwnerFallback(unwrapped),
     activeMember: Boolean(unwrapped?.flags?.vaulthero?.party?.activeMember),
     deceased: actorDeceased(unwrapped),

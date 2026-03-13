@@ -323,6 +323,207 @@ export class VendorStore {
         }
         return { ok: true, transactions: rows.map(rowToTransaction) };
     }
+    // ── Portable packs (import / export) ───────────────────────────────────────
+    exportPack(args) {
+        const worldId = String(args.worldId ?? "").trim();
+        const vendorId = String(args.vendorId ?? "").trim();
+        if (!worldId)
+            return { ok: false, error: "worldId is required" };
+        let vendorRows = [];
+        if (vendorId) {
+            const one = db.prepare(`SELECT * FROM vendors WHERE world_id = ? AND id = ?`).get(worldId, vendorId);
+            if (one)
+                vendorRows = [one];
+        }
+        else {
+            vendorRows = db.prepare(`SELECT * FROM vendors WHERE world_id = ? ORDER BY name ASC`).all(worldId);
+        }
+        if (!vendorRows.length)
+            return { ok: false, error: "No vendors found for export" };
+        const vendors = vendorRows.map((vendor) => {
+            const itemRows = db.prepare(`
+        SELECT * FROM vendor_items
+        WHERE world_id = ? AND vendor_id = ?
+        ORDER BY sort_order ASC, name ASC
+      `).all(worldId, vendor.id);
+            return {
+                externalId: vendor.id,
+                name: vendor.name,
+                description: vendor.description,
+                avatarUrl: vendor.avatar_url,
+                npcName: vendor.npc_name,
+                greetings: (() => {
+                    try {
+                        const parsed = JSON.parse(vendor.greetings || "[]");
+                        return Array.isArray(parsed) ? parsed.map((x) => String(x)) : [];
+                    }
+                    catch {
+                        return [];
+                    }
+                })(),
+                gold: Math.max(0, Math.trunc(Number(vendor.gold ?? 0))),
+                isActive: vendor.is_active === 1,
+                items: itemRows.map((it) => ({
+                    externalId: it.id,
+                    name: it.name,
+                    description: it.description,
+                    imageUrl: it.image_url,
+                    foundryItemId: it.foundry_item_id,
+                    priceGold: Math.max(0, Math.trunc(Number(it.price_gold ?? 0))),
+                    quantity: Math.max(0, Math.trunc(Number(it.quantity ?? 0))),
+                    maxQuantity: Math.max(0, Math.trunc(Number(it.max_quantity ?? 0))),
+                    restockIntervalSeconds: Math.max(0, Math.trunc(Number(it.restock_interval_seconds ?? 0))),
+                    restockAmount: Math.max(1, Math.trunc(Number(it.restock_amount ?? 1))),
+                    sortOrder: Math.trunc(Number(it.sort_order ?? 0)),
+                })),
+            };
+        });
+        const pack = {
+            format: "vaulthero.vendorPack",
+            version: 1,
+            meta: {
+                title: vendorId ? "Vendor export" : "Vendor pack export",
+                createdAt: nowIso(),
+                sourceWorldId: worldId,
+            },
+            data: { vendors },
+        };
+        return { ok: true, pack };
+    }
+    importPack(args) {
+        const worldId = String(args.worldId ?? "").trim();
+        if (!worldId)
+            return { ok: false, error: "worldId is required" };
+        const root = args.pack?.data ? args.pack : (args.pack?.pack?.data ? args.pack.pack : null);
+        const vendorRows = Array.isArray(root?.data?.vendors) ? root.data.vendors : [];
+        if (!vendorRows.length)
+            return { ok: false, error: "Pack missing data.vendors[]" };
+        let createdVendors = 0;
+        let createdItems = 0;
+        let mergedVendors = 0;
+        let mergedItems = 0;
+        for (const rawVendor of vendorRows) {
+            const name = String(rawVendor?.name ?? "").trim();
+            if (!name)
+                return { ok: false, error: "Vendor is missing required name" };
+            const vendorExternalId = String(rawVendor?.externalId ?? "").trim();
+            const existingByExternalId = vendorExternalId
+                ? db.prepare(`SELECT * FROM vendors WHERE world_id = ? AND id = ?`).get(worldId, vendorExternalId)
+                : undefined;
+            const existingByName = !existingByExternalId
+                ? db.prepare(`SELECT * FROM vendors WHERE world_id = ? AND lower(name) = lower(?)`).get(worldId, name)
+                : undefined;
+            const existingVendor = existingByExternalId ?? existingByName ?? null;
+            const greetings = Array.isArray(rawVendor?.greetings) ? rawVendor.greetings.map((x) => String(x)) : [];
+            let targetVendorId = "";
+            if (existingVendor) {
+                const updated = this.updateVendor(existingVendor.id, {
+                    name,
+                    description: rawVendor?.description ?? null,
+                    avatarUrl: rawVendor?.avatarUrl ?? null,
+                    npcName: rawVendor?.npcName ?? null,
+                    greetings,
+                    gold: Number(rawVendor?.gold ?? 0),
+                    isActive: typeof rawVendor?.isActive === "boolean" ? rawVendor.isActive : undefined,
+                });
+                if (!updated.ok)
+                    return { ok: false, error: updated.error };
+                targetVendorId = existingVendor.id;
+                mergedVendors++;
+            }
+            else {
+                const created = this.createVendor({
+                    worldId,
+                    name,
+                    description: rawVendor?.description ?? null,
+                    avatarUrl: rawVendor?.avatarUrl ?? null,
+                    npcName: rawVendor?.npcName ?? null,
+                    greetings,
+                    gold: Number(rawVendor?.gold ?? 0),
+                    createdBy: args.createdBy ?? null,
+                });
+                if (!created.ok)
+                    return { ok: false, error: created.error };
+                targetVendorId = created.vendor.id;
+                createdVendors++;
+                if (typeof rawVendor?.isActive === "boolean") {
+                    this.updateVendor(targetVendorId, { isActive: rawVendor.isActive });
+                }
+            }
+            const items = Array.isArray(rawVendor?.items) ? rawVendor.items : [];
+            for (const rawItem of items) {
+                const itemName = String(rawItem?.name ?? "").trim();
+                if (!itemName)
+                    continue;
+                const itemExternalId = String(rawItem?.externalId ?? "").trim();
+                const foundryItemId = String(rawItem?.foundryItemId ?? "").trim();
+                const existingByExternalId = itemExternalId
+                    ? db.prepare(`
+              SELECT * FROM vendor_items
+              WHERE world_id = ? AND vendor_id = ? AND id = ?
+            `).get(worldId, targetVendorId, itemExternalId)
+                    : undefined;
+                const existingByFoundry = !existingByExternalId && foundryItemId
+                    ? db.prepare(`
+              SELECT * FROM vendor_items
+              WHERE world_id = ? AND vendor_id = ? AND foundry_item_id = ?
+              LIMIT 1
+            `).get(worldId, targetVendorId, foundryItemId)
+                    : undefined;
+                const existingByNamePrice = !existingByExternalId && !existingByFoundry
+                    ? db.prepare(`
+              SELECT * FROM vendor_items
+              WHERE world_id = ? AND vendor_id = ? AND lower(name) = lower(?) AND price_gold = ?
+              LIMIT 1
+            `).get(worldId, targetVendorId, itemName, Math.max(0, Math.trunc(Number(rawItem?.priceGold ?? 0))))
+                    : undefined;
+                const existingItem = existingByExternalId ?? existingByFoundry ?? existingByNamePrice ?? null;
+                if (existingItem) {
+                    const merged = this.updateItem(existingItem.id, {
+                        name: itemName,
+                        description: rawItem?.description ?? null,
+                        imageUrl: rawItem?.imageUrl ?? null,
+                        foundryItemId: foundryItemId || null,
+                        priceGold: Number(rawItem?.priceGold ?? 0),
+                        quantity: Number(rawItem?.quantity ?? 0),
+                        maxQuantity: Number(rawItem?.maxQuantity ?? rawItem?.quantity ?? 0),
+                        restockIntervalSeconds: Number(rawItem?.restockIntervalSeconds ?? 0),
+                        restockAmount: Number(rawItem?.restockAmount ?? 1),
+                        sortOrder: Number(rawItem?.sortOrder ?? 0),
+                    });
+                    if (!merged.ok)
+                        return { ok: false, error: merged.error };
+                    mergedItems++;
+                    continue;
+                }
+                const out = this.addItem(targetVendorId, {
+                    worldId,
+                    name: itemName,
+                    description: rawItem?.description ?? null,
+                    imageUrl: rawItem?.imageUrl ?? null,
+                    foundryItemId: foundryItemId || null,
+                    priceGold: Number(rawItem?.priceGold ?? 0),
+                    quantity: Number(rawItem?.quantity ?? 0),
+                    maxQuantity: Number(rawItem?.maxQuantity ?? rawItem?.quantity ?? 0),
+                    restockIntervalSeconds: Number(rawItem?.restockIntervalSeconds ?? 0),
+                    restockAmount: Number(rawItem?.restockAmount ?? 1),
+                    sortOrder: Number(rawItem?.sortOrder ?? 0),
+                });
+                if (!out.ok)
+                    return { ok: false, error: out.error };
+                createdItems++;
+            }
+        }
+        return {
+            ok: true,
+            imported: {
+                vendors: createdVendors,
+                items: createdItems,
+                mergedVendors,
+                mergedItems,
+            },
+        };
+    }
 }
 export const vendorStore = new VendorStore();
 //# sourceMappingURL=vendorStore.js.map

@@ -1,0 +1,14 @@
+{
+  "type": "export",
+  "docType": "Actor",
+  "uuid": "Actor.actorC",
+  "externalId": "vh:Actor:actorC",
+  "foundry": {
+    "id": "actorC",
+    "name": "Companion Character",
+    "type": "character",
+    "system": {},
+    "_id": "actorC"
+  },
+  "exportedAt": "2026-03-11T00:00:02.000Z"
+}
