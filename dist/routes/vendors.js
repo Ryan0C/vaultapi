@@ -34,6 +34,44 @@ function requireDm(deps, req, worldId) {
 }
 export function makeVendorsRouter(deps) {
     const router = Router();
+    // ── Vendor packs (import / export) ─────────────────────────────────────────
+    /** GET /worlds/:worldId/vendor-packs/export?vendorId=<optional> (DM only) */
+    router.get("/:worldId/vendor-packs/export", (req, res, next) => {
+        try {
+            const { worldId } = req.params;
+            const dmErr = requireDm(deps, req, worldId);
+            if (dmErr)
+                return bad(res, dmErr.message, dmErr.status);
+            const vendorId = String(req.query?.vendorId ?? "").trim() || null;
+            const out = vendorStore.exportPack({ worldId, vendorId });
+            if (!out.ok)
+                return bad(res, out.error, 404);
+            return ok(res, out);
+        }
+        catch (err) {
+            next(err);
+        }
+    });
+    /** POST /worlds/:worldId/vendor-packs/import (DM only) */
+    router.post("/:worldId/vendor-packs/import", (req, res, next) => {
+        try {
+            const { worldId } = req.params;
+            const dmErr = requireDm(deps, req, worldId);
+            if (dmErr)
+                return bad(res, dmErr.message, dmErr.status);
+            const out = vendorStore.importPack({
+                worldId,
+                pack: req.body?.pack ?? req.body,
+                createdBy: getSessionUserId(req),
+            });
+            if (!out.ok)
+                return bad(res, out.error, 400);
+            return ok(res, out);
+        }
+        catch (err) {
+            next(err);
+        }
+    });
     // ── Vendor list + detail ─────────────────────────────────────────────────────
     /** GET /worlds/:worldId/vendors
      *  DMs see ALL vendors (active + inactive); players see only active ones.

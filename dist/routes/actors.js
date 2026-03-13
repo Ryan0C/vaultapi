@@ -143,6 +143,7 @@ export function makeActorsRouter(deps) {
     router.get("/:worldId/party", requireWorldMember, async (req, res, next) => {
         try {
             const worldId = asParamString(req.params.worldId);
+            const requesterUserId = getVaultUserId(req);
             const manifest = await actorsStore.readActorsManifest(worldId);
             const manifestActors = Array.isArray(manifest?.actors) ? manifest.actors : [];
             const actorIds = manifestActors.length
@@ -150,7 +151,7 @@ export function makeActorsRouter(deps) {
                 : await actorsStore.listActorIds(worldId);
             const summaries = await Promise.all(Array.from(new Set(actorIds)).map(async (actorId) => {
                 const actor = await actorsStore.readActor(worldId, actorId);
-                return summarizePartyActor(actor, worldId, authStore);
+                return summarizePartyActor(actor, worldId, authStore, requesterUserId);
             }));
             return res.json({
                 ok: true,
