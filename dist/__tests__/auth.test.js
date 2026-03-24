@@ -277,9 +277,71 @@ describe("auth + authz (session + api key)", () => {
         expect(res.body.ok).toBe(true);
         expect(Array.isArray(res.body.worlds)).toBe(true);
     });
+    it("set-password rejects empty and too-short passwords", async () => {
+        const user = await createAndLoginUser(app, "setpw-policy");
+        const emptyRes = await user.agent.post("/auth/set-password").send({ newPassword: "   " });
+        expect(emptyRes.status).toBe(400);
+        expect(String(emptyRes.body?.error ?? "")).toContain("required");
+        const shortRes = await user.agent.post("/auth/set-password").send({ newPassword: "short" });
+        expect(shortRes.status).toBe(400);
+        expect(String(shortRes.body?.error ?? "")).toContain("at least 8");
+        const validPassword = "Updated_password_123";
+        const okRes = await user.agent.post("/auth/set-password").send({ newPassword: validPassword });
+        expect(okRes.status).toBe(200);
+        expect(okRes.body.ok).toBe(true);
+        const relogin = await request(app).post("/auth/login").send({
+            username: user.username,
+            password: validPassword,
+        });
+        expect(relogin.status).toBe(200);
+        expect(relogin.body.ok).toBe(true);
+    });
+    it("reset-password rejects invalid newPassword values", async () => {
+        const username = `resetpw_${uuid().slice(0, 8)}`;
+        const user = createVaultUserInDb({ username, password: "Reset_old_password_123" });
+        const firstReset = authStore.createPasswordReset(user.id);
+        const emptyRes = await request(app).post("/auth/reset-password").send({
+            token: firstReset.token,
+            newPassword: "",
+        });
+        expect(emptyRes.status).toBe(400);
+        expect(String(emptyRes.body?.error ?? "")).toContain("required");
+        const shortRes = await request(app).post("/auth/reset-password").send({
+            token: firstReset.token,
+            newPassword: "short",
+        });
+        expect(shortRes.status).toBe(400);
+        expect(String(shortRes.body?.error ?? "")).toContain("at least 8");
+        const secondReset = authStore.createPasswordReset(user.id);
+        const okRes = await request(app).post("/auth/reset-password").send({
+            token: secondReset.token,
+            newPassword: "Reset_new_password_123",
+        });
+        expect(okRes.status).toBe(200);
+        expect(okRes.body.ok).toBe(true);
+    });
     it("wrong API key is rejected", async () => {
         const res = await apiKeyAuth(request(app).get("/worlds"), "wrong-key");
         expect([401, 403]).toContain(res.status);
+    });
+    it("import status returns 404 for unknown import ids", async () => {
+        const user = await createAndLoginUser(app, "import-status");
+        authStore.linkUserToWorld({
+            vaultUserId: user.userId,
+            worldId: "test-world",
+            foundryUserId: "foundry-user-import-status",
+            role: "player",
+        });
+        const res = await user.agent.get("/worlds/test-world/imports/__missing_import__/status");
+        expect(res.status).toBe(404);
+        expect(res.body.ok).toBe(false);
+        expect(res.body.worldId).toBe("test-world");
+        expect(res.body.importId).toBe("__missing_import__");
+        expect(res.body.status).toEqual(expect.objectContaining({
+            id: "__missing_import__",
+            worldId: "test-world",
+            status: "not_found",
+        }));
     });
     it("player actor list only includes linked character actors", async () => {
         const player = await createAndLoginUser(app, "actors");

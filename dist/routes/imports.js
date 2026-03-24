@@ -161,6 +161,14 @@ export function makeImportsRouter(deps) {
             const worldId = asParamString(req.params.worldId);
             const importId = asParamString(req.params.importId);
             const status = await importsStore.getImportStatus(worldId, importId);
+            if (status?.status === "not_found") {
+                return res.status(404).json({
+                    ok: false,
+                    worldId,
+                    importId,
+                    status,
+                });
+            }
             return res.json({
                 ok: true,
                 worldId,

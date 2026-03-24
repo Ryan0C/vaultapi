@@ -3,6 +3,13 @@ import { Router } from "express";
 import type { CreateAppDeps } from "../app.js";
 import { makeLoginLimiter, makeResetLimiter } from "../middleware/rateLimit.js";
 
+function validateNewPasswordInput(value: unknown): string | null {
+  const password = String(value ?? "");
+  if (!password.trim()) return "newPassword is required";
+  if (password.length < 8) return "newPassword must be at least 8 characters";
+  return null;
+}
+
 export function makeAuthRouter(deps: CreateAppDeps) {
   const { vault, authStore } = deps;
   const router = Router();
@@ -48,6 +55,8 @@ export function makeAuthRouter(deps: CreateAppDeps) {
     if (!userId) return res.status(401).json({ ok: false, error: "Login required" });
 
     const { newPassword } = req.body as any;
+    const passwordError = validateNewPasswordInput(newPassword);
+    if (passwordError) return res.status(400).json({ ok: false, error: passwordError });
     authStore.setPassword(userId, String(newPassword ?? ""));
     res.json({ ok: true });
     });
@@ -64,6 +73,8 @@ export function makeAuthRouter(deps: CreateAppDeps) {
 
     router.post("/reset-password",resetLimiter, (req, res) => {
     const { token, newPassword } = req.body as any;
+    const passwordError = validateNewPasswordInput(newPassword);
+    if (passwordError) return res.status(400).json({ ok: false, error: passwordError });
     const r = authStore.consumePasswordReset(String(token ?? ""), String(newPassword ?? ""));
     if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
     res.json({ ok: true });

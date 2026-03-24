@@ -253,6 +253,9 @@ export class AuthStore {
   }
 
   setPassword(userId: string, newPassword: string) {
+    if (!String(newPassword ?? "").trim()) {
+      throw new Error("Password must not be empty");
+    }
     const hash = bcrypt.hashSync(newPassword, 12);
     db.prepare(`
       UPDATE vault_users
