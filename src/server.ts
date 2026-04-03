@@ -4,7 +4,7 @@ import session, { type SessionOptions } from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
 
 import { createApp } from "./app.js";
-import { config } from "./config.js";
+import { config, validateSecurityCriticalEnv } from "./config.js";
 import { VaultStore } from "./services/vaultStore.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -21,6 +21,8 @@ import { ImportsStore } from "./stores/importStore.js";
 const logger = createLogger(
   (process.env.LOG_LEVEL as any) ?? "info"
 );
+
+validateSecurityCriticalEnv();
 
 // 1) DB migrations
 migrate();

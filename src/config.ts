@@ -13,6 +13,37 @@ export type Config = {
   foundryPublicRoot: string | null;
 };
 
+function isDevLikeEnv(envName: string | undefined): boolean {
+  const normalized = String(envName ?? "").trim().toLowerCase();
+  return !normalized || normalized === "development" || normalized === "dev" || normalized === "test";
+}
+
+export function validateSecurityCriticalEnv(env: NodeJS.ProcessEnv = process.env): void {
+  if (isDevLikeEnv(env.NODE_ENV)) return;
+
+  const issues: string[] = [];
+  const apiKey = String(env.VAULT_API_KEY ?? "").trim();
+  const sessionSecret = String(env.SESSION_SECRET ?? "").trim();
+  const bootstrapPassword = String(env.BOOTSTRAP_ADMIN_PASSWORD ?? "").trim();
+
+  if (!apiKey) issues.push("VAULT_API_KEY is required in non-dev environments.");
+  else if (apiKey === "dev-key") issues.push("VAULT_API_KEY must not use insecure default value 'dev-key'.");
+
+  if (!sessionSecret) issues.push("SESSION_SECRET is required in non-dev environments.");
+  else if (sessionSecret === "dev-session-secret") {
+    issues.push("SESSION_SECRET must not use insecure default value 'dev-session-secret'.");
+  }
+
+  if (!bootstrapPassword) issues.push("BOOTSTRAP_ADMIN_PASSWORD is required in non-dev environments.");
+  else if (bootstrapPassword === "change_me") {
+    issues.push("BOOTSTRAP_ADMIN_PASSWORD must not use insecure default value 'change_me'.");
+  }
+
+  if (issues.length) {
+    throw new Error(`VaultAPI security config validation failed:\n- ${issues.join("\n- ")}`);
+  }
+}
+
 function resolveVaultRoot(): string {
   const raw =
     process.env.VAULT_ROOT ??

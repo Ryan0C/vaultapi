@@ -3,9 +3,10 @@ import { Router } from "express";
 import { makeLoginLimiter, makeResetLimiter } from "../middleware/rateLimit.js";
 function validateNewPasswordInput(value) {
     const password = String(value ?? "");
-    if (!password.trim())
+    const trimmed = password.trim();
+    if (!trimmed)
         return "newPassword is required";
-    if (password.length < 8)
+    if (trimmed.length < 8)
         return "newPassword must be at least 8 characters";
     return null;
 }

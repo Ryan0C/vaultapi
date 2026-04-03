@@ -9,7 +9,9 @@
     "test": "vitest run --config vitest.config.ts",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check:ts-nocheck": "bash ./scripts/check-ts-nocheck-baseline.sh",
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/server.js",
     "cleanup:avatars": "tsx src/scripts/cleanupAvatarUploads.ts",
     "cleanup:avatars:apply": "tsx src/scripts/cleanupAvatarUploads.ts --apply"
@@ -18,7 +20,7 @@
   "license": "ISC",
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.8.0",
     "connect-sqlite3": "^0.9.16",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",

@@ -3,7 +3,7 @@
 import session from "express-session";
 import SQLiteStoreFactory from "connect-sqlite3";
 import { createApp } from "./app.js";
-import { config } from "./config.js";
+import { config, validateSecurityCriticalEnv } from "./config.js";
 import { VaultStore } from "./services/vaultStore.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,6 +15,7 @@ import { ActorsStore } from "./stores/actorsStore.js";
 import { ItemsPacksStore } from "./stores/itemsPacksStore.js";
 import { ImportsStore } from "./stores/importStore.js";
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
+validateSecurityCriticalEnv();
 // 1) DB migrations
 migrate();
 // 2) Bootstrap admin if needed

@@ -354,6 +354,10 @@ describe("auth + authz (session + api key)", () => {
     expect(shortRes.status).toBe(400);
     expect(String(shortRes.body?.error ?? "")).toContain("at least 8");
 
+    const paddedShortRes = await user.agent.post("/auth/set-password").send({ newPassword: "       a" });
+    expect(paddedShortRes.status).toBe(400);
+    expect(String(paddedShortRes.body?.error ?? "")).toContain("at least 8");
+
     const validPassword = "Updated_password_123";
     const okRes = await user.agent.post("/auth/set-password").send({ newPassword: validPassword });
     expect(okRes.status).toBe(200);
@@ -385,6 +389,13 @@ describe("auth + authz (session + api key)", () => {
     });
     expect(shortRes.status).toBe(400);
     expect(String(shortRes.body?.error ?? "")).toContain("at least 8");
+
+    const paddedShortRes = await request(app).post("/auth/reset-password").send({
+      token: firstReset.token,
+      newPassword: "       a",
+    });
+    expect(paddedShortRes.status).toBe(400);
+    expect(String(paddedShortRes.body?.error ?? "")).toContain("at least 8");
 
     const secondReset = authStore.createPasswordReset(user.id);
     const okRes = await request(app).post("/auth/reset-password").send({

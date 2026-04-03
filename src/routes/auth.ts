@@ -5,8 +5,9 @@ import { makeLoginLimiter, makeResetLimiter } from "../middleware/rateLimit.js";
 
 function validateNewPasswordInput(value: unknown): string | null {
   const password = String(value ?? "");
-  if (!password.trim()) return "newPassword is required";
-  if (password.length < 8) return "newPassword must be at least 8 characters";
+  const trimmed = password.trim();
+  if (!trimmed) return "newPassword is required";
+  if (trimmed.length < 8) return "newPassword must be at least 8 characters";
   return null;
 }
 

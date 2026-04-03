@@ -37,12 +37,14 @@ Explicit test profiles:
 ```bash
 npm run test:unit
 npm run test:integration
+npm run check:ts-nocheck
 ```
 
 Notes:
 - Default/unit tests run from `src/**` only.
 - `dist/**` is excluded from discovery.
 - Integration profile is reserved for `src/**/__tests__/integration/**`.
+- `check:ts-nocheck` fails if `@ts-nocheck` usage exceeds the committed baseline.
 
 ## Environment
 
