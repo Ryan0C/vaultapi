@@ -45,6 +45,7 @@ Notes:
 - `dist/**` is excluded from discovery.
 - Integration profile is reserved for `src/**/__tests__/integration/**`.
 - `check:ts-nocheck` fails if `@ts-nocheck` usage exceeds the committed baseline.
+- Incremental removal plan: `docs/ts-nocheck-burndown.md`.
 
 ## Environment
 

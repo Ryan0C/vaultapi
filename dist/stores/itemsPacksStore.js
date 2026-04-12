@@ -121,6 +121,7 @@ export class ItemsPacksStore {
     _searchCache = new Map();
     _compiledCache = new Map();
     _builderChoicesCache = new Map();
+    _latestPackIndexFile = new Map();
     CACHE_TTL_MS = 5 * 60_000; // 5 minutes
     SEARCH_CACHE_TTL_MS = 30_000; // 30 seconds
     _cacheGet(key) {
@@ -149,6 +150,22 @@ export class ItemsPacksStore {
     _compiledSet(key, value) {
         this._compiledCache.set(key, { value, exp: Date.now() + this.CACHE_TTL_MS });
     }
+    invalidatePack(worldId, packId) {
+        const packPrefix = `${worldId}:${packId}:`;
+        for (const k of this._cache.keys()) {
+            if (k.startsWith(packPrefix))
+                this._cache.delete(k);
+        }
+        for (const k of this._searchCache.keys()) {
+            if (k.startsWith(packPrefix))
+                this._searchCache.delete(k);
+        }
+        for (const k of this._compiledCache.keys()) {
+            if (k.startsWith(packPrefix))
+                this._compiledCache.delete(k);
+        }
+        this._builderChoicesCache.delete(`${worldId}:builderChoices`);
+    }
     /** Invalidate all cache entries for a world (call when a pack is re-exported). */
     invalidateWorld(worldId) {
         const prefix = `${worldId}:`;
@@ -167,6 +184,10 @@ export class ItemsPacksStore {
         for (const k of this._builderChoicesCache.keys()) {
             if (k.startsWith(prefix))
                 this._builderChoicesCache.delete(k);
+        }
+        for (const k of this._latestPackIndexFile.keys()) {
+            if (k.startsWith(prefix))
+                this._latestPackIndexFile.delete(k);
         }
     }
     abs(rel) {
@@ -208,9 +229,6 @@ export class ItemsPacksStore {
         if (!wid || !pid)
             return null;
         const cacheKey = `${wid}:${pid}:index`;
-        const cached = this._cacheGet(cacheKey);
-        if (cached !== undefined)
-            return cached;
         const relDir = `${this.packsRoot(wid)}/${pid}`;
         let names;
         try {
@@ -220,11 +238,23 @@ export class ItemsPacksStore {
             return null;
         }
         const candidates = names.filter(isIndexFile);
-        if (!candidates.length)
+        const fileMarkerKey = `${wid}:${pid}:indexFile`;
+        if (!candidates.length) {
+            this._latestPackIndexFile.delete(fileMarkerKey);
+            this.invalidatePack(wid, pid);
             return null;
+        }
         candidates.sort((a, b) => extractEpoch(b) - extractEpoch(a) || b.localeCompare(a));
         const latest = candidates[0];
+        const prevLatest = this._latestPackIndexFile.get(fileMarkerKey);
+        if (prevLatest && prevLatest !== latest) {
+            this.invalidatePack(wid, pid);
+        }
+        const cached = this._cacheGet(cacheKey);
+        if (cached !== undefined && prevLatest === latest)
+            return cached;
         const result = await this.readJson(`${relDir}/${latest}`);
+        this._latestPackIndexFile.set(fileMarkerKey, latest);
         // Only cache successful reads; null means pack doesn't exist yet
         if (result != null)
             this._cacheSet(cacheKey, result);
@@ -309,11 +339,25 @@ export class ItemsPacksStore {
         return compiled;
     }
     async readBuilderChoices(worldId) {
+        let packIds;
+        try {
+            const rel = this.packsRoot(worldId);
+            const ents = await fs.readdir(this.abs(rel), { withFileTypes: true });
+            packIds = ents.filter((e) => e.isDirectory()).map((e) => e.name).sort();
+        }
+        catch {
+            packIds = [];
+        }
+        for (const packId of packIds) {
+            await this.readLatestPackIndex(worldId, packId);
+        }
+        const signature = packIds
+            .map((packId) => `${packId}:${this._latestPackIndexFile.get(`${worldId}:${packId}:indexFile`) ?? "none"}`)
+            .join("|");
         const cacheKey = `${worldId}:builderChoices`;
         const cached = this._builderChoicesCache.get(cacheKey);
-        if (cached && cached.exp > Date.now())
+        if (cached && cached.exp > Date.now() && cached.signature === signature)
             return cached.value;
-        const packIds = await this.listPackIds(worldId);
         const classes = [];
         const subclasses = [];
         const species = [];
@@ -352,6 +396,7 @@ export class ItemsPacksStore {
         const value = { classes, subclasses, species, backgrounds };
         this._builderChoicesCache.set(cacheKey, {
             value,
+            signature,
             exp: Date.now() + this.CACHE_TTL_MS,
         });
         return value;

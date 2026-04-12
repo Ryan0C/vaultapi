@@ -1,8 +1,37 @@
-// @ts-nocheck
-import { Router } from "express";
+import { Router, type Request } from "express";
 import type { CreateAppDeps } from "../app.js";
 import { makeRequireWorldDm } from "../middleware/authz.js";
-// or: import { makeRequireWorldRole } from "../middleware/authz.js";
+import type { WorldRole } from "../services/authStore.js";
+
+type InviteRequestBody = {
+  foundryUserId?: unknown;
+  expiresMinutes?: unknown;
+  role?: unknown;
+};
+
+type AuthedRequest = Request & {
+  auth?: {
+    kind?: string;
+    superuser?: boolean;
+  };
+  session?: {
+    userId?: string;
+  };
+};
+
+function asInviteRole(input: unknown): WorldRole {
+  return input === "dm" || input === "observer" || input === "player" ? input : "player";
+}
+
+function asInviteBody(body: unknown): InviteRequestBody {
+  if (body && typeof body === "object") return body as InviteRequestBody;
+  return {};
+}
+
+function asParamString(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return String(value[0] ?? "").trim();
+  return String(value ?? "").trim();
+}
 
 export function makeWorldInvitesRouter(deps: CreateAppDeps) {
   const { authStore } = deps;
@@ -18,26 +47,25 @@ export function makeWorldInvitesRouter(deps: CreateAppDeps) {
    */
   router.post("/:worldId/invites", requireWorldDm, (req, res, next) => {
     try {
-      const worldId = req.params.worldId;
-
-      const anyReq = req as any;
-      const sessionUserId: string | undefined = anyReq.session?.userId;
+      const worldId = asParamString(req.params.worldId);
+      const authedReq = req as AuthedRequest;
+      const sessionUserId = authedReq.session?.userId;
 
       // If you want API-key superuser to be able to create invites, attribute to any superadmin:
       let createdBy = sessionUserId;
-      if (!createdBy && anyReq.auth?.kind === "apiKey" && anyReq.auth?.superuser) {
+      if (!createdBy && authedReq.auth?.kind === "apiKey" && authedReq.auth?.superuser) {
         createdBy = authStore.getAnySuperadminId();
       }
       if (!createdBy) return res.status(401).json({ ok: false, error: "Login required" });
 
-      const { foundryUserId, expiresMinutes, role } = req.body as any;
+      const { foundryUserId, expiresMinutes, role } = asInviteBody(req.body);
 
       const inv = authStore.createInvite({
         worldId,
         foundryUserId: String(foundryUserId ?? ""),
-        role: (role ?? "player"), // 'dm' | 'player' | 'observer'
+        role: asInviteRole(role), // 'dm' | 'player' | 'observer'
         createdBy,
-        expiresMinutes: expiresMinutes ? Number(expiresMinutes) : undefined
+        expiresMinutes: expiresMinutes == null ? undefined : Number(expiresMinutes)
       });
 
       // IMPORTANT: return raw code ONCE
